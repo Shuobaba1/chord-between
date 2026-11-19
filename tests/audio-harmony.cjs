@@ -10,7 +10,7 @@ let code=html.match(/<script>([\s\S]*?)<\/script>/)[1];
 code=code.replace('try{const saved=localStorage', 'window.lab={targetAdvice,guitarNotes,playbackPlan,synthesize,build,basic,shape,toneNames,voicing,play,stop,render,save,restore,set:s=>{state={...state,...s}},get:()=>({state,sequence}),intervals,tuning};try{const saved=localStorage');
 vm.runInContext(code,ctx);
 const lab=window.lab;let sequences=0,chords=0;
-for(const key of [0,2,4,5,7,9,11])for(const recipe of ['1645','4536251','line'])for(const extra of ['none','seventh','secondary','251','sus','minoriv'])for(const color of [true,false]){
+for(const key of [0,2,4,5,7,9,11])for(const recipe of ['1645','1564','6415','4536','4536251','line'])for(const extra of ['none','seventh','secondary','251','sus','minoriv'])for(const color of [true,false]){
  lab.set({key,recipe,extra,color});
  for(let target=1;target<lab.basic().length;target++){
   lab.set({target});lab.render();const seq=lab.build();sequences++;

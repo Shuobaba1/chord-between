@@ -1,6 +1,6 @@
 {
   "name": "chord-between",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "private": true,
   "description": "和弦之间：离线吉他和声与弹唱练习工具",
   "scripts": {

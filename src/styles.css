@@ -46,3 +46,5 @@ summary{min-height:44px;align-content:center;line-height:1.6;touch-action:manipu
 }
 @media(max-width:374px){.viz-controls>.form-label{flex-basis:100%}.panel{padding:12px}.table .btn{font-size:14px;padding:8px 6px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+
+.song-examples{font-size:13px;line-height:1.7;color:var(--muted-foreground)}.song-examples summary{cursor:pointer;color:var(--primary);overflow-wrap:anywhere}.song-examples p{margin:8px 0}.song-examples a{color:var(--primary)}

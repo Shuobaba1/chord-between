@@ -23,7 +23,7 @@ function degree(d){const k=keyData();return {pc:mod(k.pc+scale[d]),letter:(k.let
 function note(pc,letter){return {pc:mod(pc),letter:(letter+7)%7,name:spell(mod(pc),(letter+7)%7)};}
 function chord(rootNote,q,fn,detail,beats=4,bassNote=null){const n=note(rootNote.pc,rootNote.letter),bass=bassNote?note(bassNote.pc,bassNote.letter):n;return {pc:n.pc,letter:n.letter,q,name:n.name+q+(bass.pc!==n.pc?'/'+bass.name:''),bass,fn,detail,beats};}
 
-const patterns={'1645':[0,5,3,4],'4536251':[3,4,2,5,1,4,0],line:[0,4,5,2,3,0,1,4,0]};
+const patterns={'1564':[0,4,5,3],'6415':[5,3,0,4],'4536':[3,4,2,5],'1645':[0,5,3,4],'4536251':[3,4,2,5,1,4,0],line:[0,4,5,2,3,0,1,4,0]};
 function basic(){return patterns[state.recipe].map((d,i)=>{
  const minor=[1,2,5].includes(d),bass=state.recipe==='line'?({1:6,3:4,5:2}[i]):undefined;
  return chord(degree(d),minor?'m':'',['I','ii','iii','IV','V','vi','vii°'][d],bass!==undefined?'转位和弦：斜杠后面的音为最低音，连接前后的低音。':'基本进行：保持四拍，先听清和弦之间的关系。',4,bass!==undefined?degree(bass):null);
@@ -46,19 +46,57 @@ function build(){
 
 
 function chordKey(c){return c.pc+':'+c.q+':'+c.bass.pc;}
-function shapeOptions(c){
- const diff=mod(c.bass.pc-c.pc),pool=diff===0?templates[c.q]:(slashTemplates[c.q]||[]).filter(t=>t[1]===diff).map(t=>[t[0],t[2]]),result=[],seen=new Set();
- for(const [r,f] of pool){const shift=mod(c.pc-r),full=f.map(x=>x<0?-1:x+shift);
-  for(let cut=0;cut<=3;cut++){const frets=full.map((v,i)=>i<cut?-1:v),id=frets.join(','),sounds=frets.flatMap((v,i)=>v<0?[]:[mod(tuning[i]+v)]),essential=intervals[c.q].filter(v=>v!==7).map(v=>mod(c.pc+v));
-   if(seen.has(id)||sounds.length<3||sounds[0]!==c.bass.pc||!essential.every(p=>sounds.includes(p)))continue;
-   const positive=frets.filter(v=>v>0),max=Math.max(...positive),min=Math.min(...positive),open=frets.includes(0),compact=sounds.length<=4;
-   if(max>15||max-min>4)continue;seen.add(id);result.push({id,frets,open,compact,center:positive.reduce((a,b)=>a+b,0)/positive.length,score:max+positive.length*.1+(max-min)*.2+(cut?3:0),label:(open?'开放把位':compact?'紧凑把位':'封闭把位')+' · '+frets.map(x=>x<0?'×':x).join(' ')});
-  }
- }return result.sort((a,b)=>a.score-b.score);
+// Only established open shapes and movable E/A families are transposed.
+// C/G/D open grips are not mechanically shifted into large stretches.
+const movable={
+ '':[[4,[0,2,2,1,0,0]],[9,[-1,0,2,2,2,0]]],
+ m:[[4,[0,2,2,0,0,0]],[9,[-1,0,2,2,1,0]]],
+ '7':[[4,[0,2,0,1,0,0]],[9,[-1,0,2,0,2,0]]],
+ maj7:[[4,[0,-1,1,1,0,-1]],[9,[-1,0,2,1,2,0]]],
+ m7:[[4,[0,2,0,0,0,0]],[9,[-1,0,2,0,1,0]]],
+ 'm7♭5':[[11,[-1,2,3,2,3,-1]],[6,[2,-1,2,2,1,-1]]],
+ '7sus4':[[4,[0,2,0,2,0,0]],[9,[-1,0,2,0,3,0]]]
+};
+const movableSlash={'':[[0,4,[-1,-1,2,0,1,0]],[7,4,[-1,2,0,0,3,3]]],m:[[4,3,[3,2,2,0,0,0]]]};
+// Conservative plan: at most one barre, with no open/lower-fretted string
+// under it, and at most four fretting fingers. No thumb-dependent grips.
+function handPlan(frets){
+ const pressed=frets.map((f,i)=>({f,i})).filter(x=>x.f>0);
+ if(!pressed.length)return {fingers:0,barre:null};
+ const lo=Math.min(...pressed.map(x=>x.f)),hi=Math.max(...pressed.map(x=>x.f));
+ if(hi>12||hi-lo>3)return null;
+ let best={fingers:pressed.length,barre:null};
+ for(const fret of new Set(pressed.map(x=>x.f)))for(let a=0;a<6;a++)for(let b=a+1;b<6;b++){
+  if(frets[a]!==fret||frets[b]!==fret||frets.slice(a,b+1).some(x=>x>=0&&x<fret))continue;
+  const covered=pressed.filter(x=>x.i>=a&&x.i<=b&&x.f===fret).length;
+  const fingers=pressed.length-covered+1;
+  if(fingers<best.fingers)best={fingers,barre:{fret,from:a,to:b}};
+ }
+ return best.fingers<=4?best:null;
 }
+function shapeOptions(c){
+ const diff=mod(c.bass.pc-c.pc),result=[],seen=new Set();
+ const openPool=diff===0?templates[c.q]:(slashTemplates[c.q]||[]).filter(t=>t[1]===diff).map(t=>[t[0],t[2]]);
+ const movePool=diff===0?movable[c.q]:(movableSlash[c.q]||[]).filter(t=>t[1]===diff).map(t=>[t[0],t[2]]);
+ const candidates=[];
+ for(const [r,f] of openPool||[])if(r===c.pc)candidates.push(f);
+ for(const [r,f] of movePool||[]){
+  const shift=mod(c.pc-r);
+  for(const delta of [shift,shift-12])if(f.every(x=>x<0||x+delta>=0))candidates.push(f.map(x=>x<0?-1:x+delta));
+ }
+ for(const full of candidates)for(let cut=0;cut<=3;cut++){
+  const frets=full.map((v,i)=>i<cut?-1:v),id=frets.join(','),hand=handPlan(frets);
+  const sounds=frets.flatMap((v,i)=>v<0?[]:[mod(tuning[i]+v)]),essential=intervals[c.q].filter(v=>v!==7).map(v=>mod(c.pc+v));
+  if(!hand||seen.has(id)||sounds.length<3||sounds[0]!==c.bass.pc||!essential.every(p=>sounds.includes(p))||!sounds.every(p=>intervals[c.q].some(v=>mod(c.pc+v)===p)))continue;
+  const positive=frets.filter(v=>v>0),max=Math.max(0,...positive),min=Math.min(...positive),open=frets.includes(0),compact=sounds.length<=4;
+  seen.add(id);result.push({id,frets,hand,open,compact,center:positive.length?positive.reduce((a,b)=>a+b,0)/positive.length:0,score:max+hand.fingers*.2+(max-min)*.3+(cut?3:0),label:(open?'开放把位':compact?'紧凑把位':'封闭把位')+' · '+frets.map(x=>x<0?'×':x).join(' ')});
+ }
+ return result.sort((a,b)=>a.score-b.score);
+}
+
 function shape(c){
  const options=shapeOptions(c),manual=options.find(o=>o.id===state.voicings?.[chordKey(c)]);if(manual)return manual.frets;
- if(c._frets)return c._frets;
+ if(c._frets&&options.some(o=>o.id===c._frets.join(',')))return c._frets;
  if(state.preference==='easy')return options.slice().sort((a,b)=>(a.open?0:a.compact?5:12)+a.score*.15-((b.open?0:b.compact?5:12)+b.score*.15))[0].frets;
  return options[0].frets;
 }
@@ -70,7 +108,9 @@ function toneNames(c){const steps=c.q==='7sus4'?[0,3,4,6]:intervals[c.q].length=
 function drawChord(){
  const c=sequence[selected],f=shape(c),positive=f.filter(v=>v>0),start=Math.max(...f)<=4?1:Math.min(...positive),count=Math.max(4,Math.max(...f)-start+1),height=240;
  let svg='<svg class="pbl-fretboard" viewBox="0 0 220 '+height+'" role="img" aria-label="'+c.name+'，6至1弦品数 '+f.map(v=>v<0?'不弹':v).join('、')+'"><title>'+c.name+' 参考把位</title>';
- const gap=140/count;
+ const gap=140/count,hand=handPlan(f);
+ if(hand?.barre){const b=hand.barre;svg+='<line stroke="currentColor" stroke-width="12" stroke-linecap="round" x1="'+(42+b.from*30)+'" x2="'+(42+b.to*30)+'" y1="'+(45+(b.fret-start+.5)*gap)+'" y2="'+(45+(b.fret-start+.5)*gap)+'"/>'; }
+ get('hand-note').textContent=hand?.barre?'横按：第 '+hand.barre.fret+' 品，'+(6-hand.barre.from)+'–'+(6-hand.barre.to)+' 弦':'无需横按';
  for(let i=0;i<=count;i++){const y=45+i*gap;svg+='<line class="grid" x1="42" y1="'+y+'" x2="192" y2="'+y+'"/>';if(i<count)svg+='<text x="18" y="'+(y+gap/2)+'">'+(start+i)+'</text>';}
  f.forEach((v,i)=>{const x=42+i*30;svg+='<line class="grid" x1="'+x+'" x2="'+x+'" y1="45" y2="185"/><text x="'+x+'" y="207">'+(6-i)+'</text>';if(v<=0)svg+='<text x="'+x+'" y="25">'+(v<0?'×':'○')+'</text>';else svg+='<circle class="dot" cx="'+x+'" cy="'+(45+(v-start+.5)*gap)+'" r="9"/>';});
  get('fret').innerHTML=svg+'</svg>';get('chord-title').textContent=c.name;get('tones').textContent='和弦音：'+toneNames(c).join(' · ')+' ｜ 低音：'+c.bass.name;get('shape').innerHTML=shapeOptions(c).map(o=>'<option value="'+o.id+'">'+o.label+'</option>').join('');get('shape').value=f.join(',');const link=connectionAt(selected);get('detail').textContent=link?link.text:c.name+' · '+c.fn;get('connection').disabled=!link;
@@ -106,7 +146,111 @@ const rhythms={
  arp:{actions:['B','3','2','1','2','3','2','1'],labels:['低','③','②','①','②','③','②','①'],note:'低＝当前把位最低音；圈内数字为标准弦号。所选弦不弹时，使用邻近有效弦。'},
  muted:{actions:['D','-','X','U','-','U','X','U'],labels:['↓','·','×','↑','·','↑','×','↑'],note:'第 2、4 拍短促闷切。× 使用短音模拟触弦消音；新和弦接着小节拍点弹。'}
 };
+const songExamples={
+ "1564": [
+  [
+   "Let It Be",
+   "The Beatles",
+   "前奏／主歌开头",
+   "C – G – Am – F；后半句改变，不是整首无限循环。",
+   "https://openguitarchords.com/songs/let-it-be-chords"
+  ],
+  [
+   "I'm Yours",
+   "Jason Mraz",
+   "主要循环",
+   "B – F♯ – G♯m – E；另有过渡和弦。",
+   "https://spytunes.com/im-yours-chords/"
+  ]
+ ],
+ "1645": [
+  [
+   "Stand by Me",
+   "Ben E. King",
+   "主要循环",
+   "A – F♯m – D – E；原曲和弦时值不同于本工具的等长练习。",
+   "https://www.theguitarlesson.com/guitar-lessons/stand-by-me-guitar-lesson-ben-e-king/"
+  ],
+  [
+   "Blue Moon",
+   "经典流行标准曲",
+   "常见弹唱骨架",
+   "I–vi–IV–V 的经典用法；不同演唱版本有转调及替代和弦。",
+   "https://www.fender.com/articles/chords/guitar-chords-that-sound-good-together"
+  ]
+ ],
+ "4536": [
+  [
+   "三人游",
+   "方大同",
+   "副歌循环",
+   "F – G – Em – Am；主歌是另一种进行。",
+   "https://chord4.com/tabs/535"
+  ],
+  [
+   "演员",
+   "薛之谦",
+   "副歌前半句",
+   "C – D/C – Bm – Em（G 调指法）；后续接 ii–V–I。",
+   "https://chord4.com/tabs/33762"
+  ]
+ ],
+ "6415": [
+  [
+   "平凡之路",
+   "朴树",
+   "副歌骨架",
+   "G 调指法：Em – C – G – D；部分句尾改为 G。",
+   "https://chord4.com/tabs/2525"
+  ],
+  [
+   "Zombie",
+   "The Cranberries",
+   "主要循环",
+   "Em – C – G – D/F♯；实际以 E 小调为中心，此处按相对大调编号，练习简化了末尾低音。",
+   "https://richterguitar.com/zombie-the-cranberries/"
+  ]
+ ],
+ "4536251": [
+  [
+   "演员",
+   "薛之谦",
+   "副歌骨架",
+   "G 调指法：C – D/C – Bm – Em – Am – D – G；练习简化了 D/C 的低音与过渡。",
+   "https://chord4.com/tabs/33762"
+  ],
+  [
+   "你还要我怎样",
+   "薛之谦",
+   "主歌后半句",
+   "C 调指法：Fmaj7 – G – Em – Am7 – Dm7 – G – C；可用七和弦选项比较色彩。",
+   "https://chord4.com/tabs/37013"
+  ]
+ ],
+ "line": [
+  [
+   "Piano Man",
+   "Billy Joel",
+   "下行低音技法参考",
+   "低音沿 C 大调下行；和弦及原曲三拍子与本工具四拍教学进行不同。",
+   "https://www.guitarworld.com/lessons/songwriting-tips-pairing-chords-with-walking-down-bass-lines-like-piano-man"
+  ],
+  [
+   "Friend of the Devil",
+   "Grateful Dead",
+   "下行低音技法参考",
+   "前奏和主歌使用 G 大调下行音阶与转位连接；不是本预设逐和弦复刻。",
+   "https://www.guitarworld.com/lessons/songwriting-tips-pairing-chords-with-walking-down-bass-lines-like-piano-man"
+  ]
+ ]
+};
+function renderSongs(){
+ const items=songExamples[state.recipe];
+ get('song-summary').textContent='歌曲参考 · '+items.map(s=>'《'+s[0]+'》').join(' / ');
+ get('songs').innerHTML=items.map(s=>'<p><strong>'+s[1]+' · '+s[0]+'</strong> <span class="text-small">'+s[2]+'</span><br>'+s[3]+' <a href="'+s[4]+'" target="_blank" rel="noopener noreferrer">查看来源 ↗</a></p>').join('');
+}
 function render(){
+ renderSongs();
  get('rhythm').value=state.rhythm;const rhythm=rhythms[state.rhythm];get('pattern').innerHTML=['1','&','2','&','3','&','4','&'].map((beat,i)=>'<span>'+beat+'<strong>'+rhythm.labels[i]+'</strong></span>').join('');get('pattern-note').textContent=rhythm.note;
 
  get('tone').value=state.tone;get('key').value=String(state.key);get('recipe').value=state.recipe;get('color').checked=state.color;get('bpm').value=String(state.bpm);get('bpm-value').textContent=state.bpm+' BPM';fillTargets();
